@@ -4,6 +4,7 @@ import 'dart:developer' as dev;
 import 'package:http/http.dart' as http;
 import './models/comment.dart';
 import './models/error.dart';
+import './models/response.dart';
 import './models/user.dart';
 import 'commentum_storage.dart';
 import 'commentum_config.dart';
@@ -131,11 +132,11 @@ class CommentumClient {
   ///
   /// * [mediaId]: The ID of the media (anime/manga) in the external database.
   /// * [content]: The text body of the comment.
-  Future<Comment> createComment(String mediaId, String content) async {
+  Future<Comment> createComment(String mediaId, String content, { required String? client }) async {
     final data = await _request(
       '/posts',
       method: 'POST',
-      body: {'media_id': mediaId, 'content': content},
+      body: {'media_id': mediaId, 'content': content, 'client': client},
     );
     return Comment.fromJson(data['post']);
   }
@@ -144,11 +145,11 @@ class CommentumClient {
   ///
   /// * [parentId]: The ID of the comment being replied to.
   /// * [content]: The text body of the reply.
-  Future<Comment> createReply(String parentId, String content) async {
+  Future<Comment> createReply(String parentId, String content, { required String? client }) async {
     final data = await _request(
       '/posts',
       method: 'POST',
-      body: {'parent_id': parentId, 'content': content},
+      body: {'parent_id': parentId, 'content': content, 'client': client},
     );
     return Comment.fromJson(data['post']);
   }
@@ -156,8 +157,8 @@ class CommentumClient {
   /// Retrieves a paginated list of root comments for [mediaId].
   ///
   /// * [limit]: Max items to return (default: 20).
-  /// * [cursor]: Pagination cursor from a previous [PaginatedComments] result.
-  Future<PaginatedComments> listComments(
+  /// * [cursor]: Pagination cursor from a previous [CommentumResponse] result.
+  Future<CommentumResponse> listComments(
     String mediaId, {
     int limit = 20,
     String? cursor,
@@ -166,14 +167,14 @@ class CommentumClient {
     if (cursor != null) params['cursor'] = cursor;
 
     final data = await _request('/posts', params: params);
-    return PaginatedComments.fromJson(data, isReply: false);
+    return CommentumResponse.fromJson(data, isReply: false);
   }
 
   /// Retrieves a paginated list of replies.
   ///
   /// * [rootId]: The ID of the top-level ancestor comment.
   /// * [parentId]: (Optional) Filter by direct parent ID.
-  Future<PaginatedComments> listReplies(
+  Future<CommentumResponse> listReplies(
     String rootId, {
     int limit = 20,
     String? cursor,
@@ -184,7 +185,7 @@ class CommentumClient {
     if (cursor != null) params['cursor'] = cursor;
 
     final data = await _request('/posts', params: params);
-    return PaginatedComments.fromJson(data, isReply: true);
+    return CommentumResponse.fromJson(data, isReply: true);
   }
 
   /// Updates the text content of a comment.
@@ -443,22 +444,4 @@ class CommentumClient {
   }
 }
 
-/// A wrapper for paginated lists returned by the API.
-///
-/// Contains the list of [items] and a [nextCursor] for fetching the subsequent page.
-class PaginatedComments {
-  final List<Comment> items;
-  final String? nextCursor;
 
-  PaginatedComments({required this.items, this.nextCursor});
-
-  factory PaginatedComments.fromJson(Map<String, dynamic> json,
-      {required bool isReply}) {
-    final key = isReply ? 'replies' : 'comments';
-    return PaginatedComments(
-      items:
-          (json[key] as List?)?.map((c) => Comment.fromJson(c)).toList() ?? [],
-      nextCursor: json['next_cursor'],
-    );
-  }
-}

@@ -13,6 +13,10 @@ class Comment {
   final bool hasMoreReplies;
   final int repliesCount;
   final int? userVote;
+  final String? rootId;
+  final String? parentId;
+  final String? mediaId;
+  final String? client;
 
   Comment({
     required this.id,
@@ -27,6 +31,10 @@ class Comment {
     required this.hasMoreReplies,
     required this.repliesCount,
     this.userVote,
+    this.rootId,
+    this.parentId,
+    this.mediaId,
+    this.client,
   });
 
   factory Comment.fromJson(Map<String, dynamic> json) {
@@ -53,6 +61,10 @@ class Comment {
       hasMoreReplies: json['has_more_replies'] ?? false,
       repliesCount: json['replies_count'] ?? 0,
       userVote: json['user_vote'],
+      rootId: json['root_id']?.toString(),
+      parentId: json['parent_id']?.toString(),
+      mediaId: json['media_id']?.toString(),
+      client: json['client'],
     );
   }
 
@@ -69,6 +81,10 @@ class Comment {
     bool? hasMoreReplies,
     int? repliesCount,
     int? userVote,
+    String? rootId,
+    String? parentId,
+    String? mediaId,
+    String? client,
   }) {
     return Comment(
       id: id ?? this.id,
@@ -83,6 +99,10 @@ class Comment {
       hasMoreReplies: hasMoreReplies ?? this.hasMoreReplies,
       repliesCount: repliesCount ?? this.repliesCount,
       userVote: userVote ?? this.userVote,
+      rootId: rootId ?? this.rootId,
+      parentId: parentId ?? this.parentId,
+      mediaId: mediaId ?? this.mediaId,
+      client: client ?? this.client,
     );
   }
 }
