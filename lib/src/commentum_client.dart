@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' as dev;
 import 'package:http/http.dart' as http;
 import './models/comment.dart';
 import './models/error.dart';
 import './models/user.dart';
-import 'commentum_config.dart';
 import 'commentum_storage.dart';
+import 'commentum_config.dart';
 
 /// Client for interacting with the Commentum API.
 ///
@@ -18,12 +19,12 @@ class CommentumClient {
 
   /// In-memory cache of JWTs to minimize async storage reads.
   final Map<CommentumProvider, String> _tokenCache = {};
-  
+
   CommentumProvider? _activeProvider;
 
   /// Creates a new [CommentumClient] instance.
   ///
-  /// * [config]: Configuration for base URL and timeouts.
+  /// * [config]: Configuration for base URL, timeouts, and logging.
   /// * [storage]: Persistence strategy for tokens (e.g., SecureStorage, Hive).
   /// * [httpClient]: Optional custom http client for testing or interception.
   CommentumClient({
@@ -55,7 +56,7 @@ class CommentumClient {
   CommentumProvider? get activeProvider => _activeProvider;
 
   /// Whether the [activeProvider] has a valid cached token.
-  bool get isLoggedIn => 
+  bool get isLoggedIn =>
       _activeProvider != null && _tokenCache.containsKey(_activeProvider);
 
   // ---------------------------------------------------------------------------
@@ -68,7 +69,8 @@ class CommentumClient {
   /// * [providerAccessToken]: The access token received from the provider's OAuth flow.
   ///
   /// Automatically caches the resulting JWT and sets the provider as active.
-  Future<void> login(CommentumProvider provider, String providerAccessToken) async {
+  Future<void> login(
+      CommentumProvider provider, String providerAccessToken) async {
     final data = await _request(
       '/auth',
       method: 'POST',
@@ -82,7 +84,7 @@ class CommentumClient {
     final jwt = data['token'];
     _tokenCache[provider] = jwt;
     await storage.saveToken(provider, jwt);
-    
+
     setActiveProvider(provider);
   }
 
@@ -241,6 +243,11 @@ class CommentumClient {
   // ---------------------------------------------------------------------------
 
   /// Performs the HTTP request, handles auth headers, and parses errors.
+  ///
+  /// Wraps [http.Client] calls with:
+  /// 1. Auth header injection
+  /// 2. Request/Response Logging (if enabled)
+  /// 3. Error handling and wrapping into [CommentumError]
   Future<dynamic> _request(
     String endpoint, {
     String method = 'GET',
@@ -265,9 +272,17 @@ class CommentumClient {
       }
     }
 
-    if (config.enableLogging) {
+    // -- Simple Logging --
+    if (config.enableLogging && !config.verboseLogging) {
       print('[Commentum] $method $url');
     }
+
+    // -- Verbose Request Logging --
+    if (config.verboseLogging) {
+      _logRequest(method, url, headers, body);
+    }
+
+    final stopwatch = Stopwatch()..start();
 
     try {
       http.Response response;
@@ -275,23 +290,37 @@ class CommentumClient {
 
       switch (method.toUpperCase()) {
         case 'POST':
-          response = await _httpClient.post(url, headers: headers, body: encodedBody);
+          response =
+              await _httpClient.post(url, headers: headers, body: encodedBody);
           break;
         case 'PUT':
-          response = await _httpClient.put(url, headers: headers, body: encodedBody);
+          response =
+              await _httpClient.put(url, headers: headers, body: encodedBody);
           break;
         case 'PATCH':
-          response = await _httpClient.patch(url, headers: headers, body: encodedBody);
+          response =
+              await _httpClient.patch(url, headers: headers, body: encodedBody);
           break;
         case 'DELETE':
-          response = await _httpClient.delete(url, headers: headers, body: encodedBody);
+          response = await _httpClient.delete(url,
+              headers: headers, body: encodedBody);
           break;
         default:
           response = await _httpClient.get(url, headers: headers);
       }
 
+      stopwatch.stop();
+
+      // -- Verbose Response Logging --
+      if (config.verboseLogging) {
+        _logResponse(response, stopwatch.elapsedMilliseconds);
+      }
+
       // Handle 401 Unauthorized
-      if (response.statusCode == 401 && !isRetry && useAuth && _activeProvider != null) {
+      if (response.statusCode == 401 &&
+          !isRetry &&
+          useAuth &&
+          _activeProvider != null) {
         throw CommentumError('Unauthorized: Token expired or invalid', 401);
       }
 
@@ -299,7 +328,8 @@ class CommentumClient {
       try {
         responseBody = jsonDecode(response.body);
       } catch (e) {
-        throw CommentumError('Invalid JSON response from server', response.statusCode);
+        throw CommentumError(
+            'Invalid JSON response from server', response.statusCode);
       }
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -310,15 +340,103 @@ class CommentumClient {
       }
 
       return responseBody;
-
-    } on http.ClientException catch (e) {
+    } on http.ClientException catch (e, stackTrace) {
+      stopwatch.stop();
+      if (config.verboseLogging) {
+        _logError(e, stopwatch.elapsedMilliseconds, stackTrace);
+      }
       throw CommentumError('Network Error: ${e.message}', 0);
-    } catch (e) {
+    } catch (e, stackTrace) {
+      stopwatch.stop();
+      if (config.verboseLogging) {
+        _logError(e, stopwatch.elapsedMilliseconds, stackTrace);
+      }
       if (e is CommentumError) rethrow;
       throw CommentumError('Unexpected Error: $e', 0);
     }
   }
-  
+
+  // ---------------------------------------------------------------------------
+  // LOGGING UTILITIES
+  // ---------------------------------------------------------------------------
+
+  /// Logs outgoing requests in a structured, box-drawing format.
+  void _logRequest(
+      String method, Uri url, Map<String, String> headers, dynamic body) {
+    final buffer = StringBuffer();
+    buffer.writeln(
+        '╔══════════════════════════════════════════════════════════════╗');
+    buffer.writeln('║ ↗️ REQUEST');
+    buffer.writeln(
+        '╠══════════════════════════════════════════════════════════════');
+    buffer.writeln('║ URL: $method $url');
+    buffer.writeln('║ Headers:');
+    headers.forEach((k, v) => buffer.writeln('║   $k: $v'));
+    if (body != null) {
+      buffer.writeln('║ Body:');
+      _prettyPrintJson(body, buffer);
+    }
+    buffer.writeln(
+        '╚══════════════════════════════════════════════════════════════╝');
+    dev.log(buffer.toString(), name: 'Commentum');
+  }
+
+  /// Logs incoming responses, including latency and formatted JSON body.
+  void _logResponse(http.Response response, int latencyMs) {
+    final buffer = StringBuffer();
+    buffer.writeln(
+        '╔══════════════════════════════════════════════════════════════╗');
+    buffer.writeln('║ ↘️ RESPONSE [${response.statusCode}] (${latencyMs}ms)');
+    buffer.writeln(
+        '╠══════════════════════════════════════════════════════════════');
+    buffer.writeln('║ Headers:');
+    response.headers.forEach((k, v) => buffer.writeln('║   $k: $v'));
+    buffer.writeln('║ Body:');
+    try {
+      final json = jsonDecode(response.body);
+      _prettyPrintJson(json, buffer);
+    } catch (_) {
+      // If body isn't JSON, just print raw
+      buffer.writeln('║   ${response.body}');
+    }
+    buffer.writeln(
+        '╚══════════════════════════════════════════════════════════════╝');
+    dev.log(buffer.toString(), name: 'Commentum');
+  }
+
+  /// Logs errors and exceptions, including stack traces if available.
+  void _logError(dynamic error, int latencyMs, [StackTrace? stackTrace]) {
+    final buffer = StringBuffer();
+    buffer.writeln(
+        '╔══════════════════════════════════════════════════════════════╗');
+    buffer.writeln('║ ❌ ERROR (${latencyMs}ms)');
+    buffer.writeln(
+        '╠══════════════════════════════════════════════════════════════');
+    buffer.writeln('║ Error: $error');
+    if (stackTrace != null) {
+      buffer.writeln('║ StackTrace:');
+      final traceLines =
+          stackTrace.toString().split('\n').take(5); // Limit to top 5 lines
+      for (var line in traceLines) {
+        if (line.isNotEmpty) buffer.writeln('║   $line');
+      }
+    }
+    buffer.writeln(
+        '╚══════════════════════════════════════════════════════════════╝');
+    dev.log(buffer.toString(), name: 'Commentum', error: error);
+  }
+
+  /// Helper to indent and format JSON for readability in logs.
+  void _prettyPrintJson(dynamic json, StringBuffer buffer) {
+    var spaces = '║   ';
+    var encoder = JsonEncoder.withIndent('  ');
+    var prettyString = encoder.convert(json);
+    // Indent each line to align with the log box
+    prettyString
+        .split('\n')
+        .forEach((element) => buffer.writeln('$spaces$element'));
+  }
+
   /// Closes the underlying HTTP client.
   void dispose() {
     _httpClient.close();
@@ -334,10 +452,12 @@ class PaginatedComments {
 
   PaginatedComments({required this.items, this.nextCursor});
 
-  factory PaginatedComments.fromJson(Map<String, dynamic> json, {required bool isReply}) {
+  factory PaginatedComments.fromJson(Map<String, dynamic> json,
+      {required bool isReply}) {
     final key = isReply ? 'replies' : 'comments';
     return PaginatedComments(
-      items: (json[key] as List?)?.map((c) => Comment.fromJson(c)).toList() ?? [],
+      items:
+          (json[key] as List?)?.map((c) => Comment.fromJson(c)).toList() ?? [],
       nextCursor: json['next_cursor'],
     );
   }

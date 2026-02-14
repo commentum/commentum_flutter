@@ -19,11 +19,13 @@ class CommentumConfig {
   final Duration connectTimeout;
   final Duration receiveTimeout;
   final bool enableLogging;
+  final bool verboseLogging;
 
   const CommentumConfig({
     required this.baseUrl,
     this.connectTimeout = const Duration(seconds: 10),
     this.receiveTimeout = const Duration(seconds: 10),
     this.enableLogging = false,
+    this.verboseLogging = false,
   });
 }
