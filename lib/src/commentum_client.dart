@@ -153,11 +153,11 @@ class CommentumClient {
   /// [client] (optional)
   /// Identifier of the client application creating the post
   /// (e.g., "web", "ios", "android", "api").
-  Future<Comment> createComment(String mediaId, String mediaProvider, String content, {String? client}) async {
+  Future<Comment> createComment(String mediaId, String mediaProvider, String content) async {
     final data = await _request(
       '/posts',
       method: 'POST',
-      body: {'media_id': mediaId, 'media_provider': mediaProvider, 'content': content, 'client': client},
+      body: {'media_id': mediaId, 'media_provider': mediaProvider, 'content': content, 'client': config.appClient},
     );
     return Comment.fromJson(data['post']);
   }
@@ -167,11 +167,11 @@ class CommentumClient {
   /// * [parentId] : The ID of the comment being replied to.
   /// * [content] : The text body of the reply.
   /// * [client] : Optional client identifier.
-  Future<Comment> createReply(String parentId, String content, {String? client}) async {
+  Future<Comment> createReply(String parentId, String content) async {
     final data = await _request(
       '/posts',
       method: 'POST',
-      body: {'parent_id': parentId, 'content': content, 'client': client},
+      body: {'parent_id': parentId, 'content': content, 'client': config.appClient},
     );
     return Comment.fromJson(data['post']);
   }
